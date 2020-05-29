@@ -1,0 +1,413 @@
+---
+title: Analysis CD39
+params:
+  input_file: "../results/50_prepare_analysis_cd39/adata.h5ad"
+  adata_scenic: "../results/06_prepare_scenic_analysis/adata.h5ad"
+  input_de_res_dir_cd39: "../results/50-2_run_de_analysis_cd39"
+  cpus: 16
+---
+# Load data
+
+```{r message=FALSE}
+library(conflicted)
+conflict_prefer("Position", "base")
+library(dplyr)
+conflict_prefer("filter", "dplyr")
+conflict_prefer("select", "dplyr")
+library(ggplot2)
+library(ggpubr)
+library(ggbeeswarm)
+library(readr)
+library(tidyr)
+library(reticulate)
+library(clusterProfiler)
+library(foreach)
+library(doMC)
+library(org.Hs.eg.db)
+library(cowplot)
+library(stringr)
+library(kableExtra)
+library(EnhancedVolcano)
+knitr::knit_engines$set(python = reticulate::eng_python)
+reticulate::py_available(TRUE)
+# bug in rstudio/reticulate:
+matplotlib <- import("matplotlib")
+matplotlib$use("Agg", force = TRUE)
+registerDoMC(cores=16)
+```
+
+```{python}
+import scanpy as sc
+import matplotlib.pyplot as plt
+import matplotlib
+import sys
+import seaborn as sns
+
+sys.path.extend(("lib", "../lib"))
+from jupytertools import *
+from scenictools import * 
+fix_logging(sc.settings)
+matplotlib.rcParams.update({"figure.autolayout": True, "figure.max_open_warning": 0})
+
+adata = sc.read_h5ad(r.params['input_file'])
+adata_scenic = sc.read_h5ad(r.params['adata_scenic'])
+```
+
+```{r}
+obs = py$adata$obs
+```
+
+```{r message=FALSE}
+get_path_cd39 = function(file_name) {file.path(params$input_de_res_dir_cd39, file_name)}
+
+de_pairwise = read_tsv(get_path_cd39("cd39_status.rda.res.tsv"))
+```
+
+```{r export_xlsx}
+writexl::write_xlsx(de_pairwise, "pairwise_comparison.xlsx")
+```
+
+# DE-analysis
+```{python, echo=FALSE}
+sc.pl.umap(
+    adata,
+    color=[
+        "cd39_status",
+    ],
+    size=10,
+    ncols=2, 
+    legend_loc="on data"
+)
+```
+
+```{r, include=FALSE}
+mapping = data_frame("cluster"=c("cd4_cd8", "cd4_treg", "cd8_treg"), cluster_name=c("CD4+ vs. CD8+", "CD4+ vs. Treg", "CD8+ vs. Treg"))
+```
+
+## Differntial expression analysis (pairwise comparison of clusters)
+How to read the plot: 
+`cd4_cd8` shows genes that are differentially expressed between cells in the CD4 and CD8 cluster. Blue: Enriched in CD8, under-represented in CD4; Orange: Enriched in CD4, uner-represented in CD8. 
+Analogous for the other two comparisons. 
+
+```{r echo=FALSE, fig.height=7, fig.width=12}
+de_pairwise2 = de_pairwise %>%
+    inner_join(mapping) %>%
+    filter(str_starts(gene_symbol, "TRAV", negate = TRUE), str_starts(gene_symbol, "TRBV", negate=TRUE)) %>%
+    group_by(cluster_name) %>%
+    mutate(rk = rank(-abs(logFC))) %>%
+    arrange(rk)
+
+p_pairwise = de_pairwise2 %>%
+    ungroup() %>%
+    filter(rk <= 50) %>%
+   # filter(logFC > 0) %>%
+    ggplot(aes(x=logFC, y=rk)) +
+    geom_vline(xintercept =0, color="grey", linetype="dashed") +
+    geom_text(aes(label=gene_symbol, x=-9), angle=0, size=3, nudge_x=1, hjust=0) +
+    geom_point(color="black", size=3.5) +
+    geom_point(aes(color=logFC), size=3) +
+    scale_color_distiller(type="seq", palette="RdYlBu", direction=-1) +
+    # geom_text(aes(label="label", x=5, y=10), data=de_genes_count, ha="right", size=8) +
+    facet_wrap(~cluster_name, ncol=3) +
+    coord_cartesian(xlim=c(-8, 6)) +
+    scale_y_reverse() +
+    ggtitle(paste0("Pairwise differential gene expression analysis")) +
+    theme_bw() +
+    theme(legend.position="none")
+
+ggsave2(filename="figures/de.pdf", plot = p_pairwise, width=12, height=7, units="in")
+# ggsave2(filename="figures/de.svg", plot = p_pairwise, width=12, height=7, units="in")
+
+
+p_pairwise
+
+
+```
+
+
+## DE as volcano plot
+```{r, fig.width=6, fig.height=6, echo=FALSE, message=FALSE, warning=FALSE}
+lapply(mapping$cluster_name, function(comparison) {
+  tt = de_pairwise2 %>%
+    filter(cluster_name == "CD4+ vs. Treg") 
+  
+  labelling_cutoff = sort(tt$PValue)[20]
+  
+  p_cutoff = 0.01 / nrow(tt)
+  
+  tt %>% 
+    EnhancedVolcano(
+                x='logFC',
+                y='PValue', 
+                lab=tt$gene_symbol,
+                title=comparison, 
+                subtitle="Volcano Plot",
+                pLabellingCutoff = labelling_cutoff,
+                drawConnectors = TRUE)
+
+})
+
+```
+<!-- 
+GO-term not really meaningful
+## GO-term enrichment analysis
+```{r include=FALSE}
+MIN_FC = .5
+cluster_names = de_pairwise %>% pull(cluster) %>% unique()
+universe = de_pairwise %>% pull(gene_symbol) %>% unique()
+
+# dummy see https://github.com/YuLab-SMU/clusterProfiler/issues/207
+.x = enrichGO(c("CD8A"), OrgDb = org.Hs.eg.db, keyType = "SYMBOL", ont = "BP", universe = universe)
+
+egos_bp = foreach(clus = cluster_names,
+                  .final = function(x) setNames(x, cluster_names)) %dopar% {
+  genes = de_pairwise %>%
+    filter(cluster == clus, logFC > MIN_FC) %>%
+    pull(gene_symbol) %>% unique()
+  ego = enrichGO(genes,
+         OrgDb = org.Hs.eg.db,
+         keyType = "SYMBOL",
+         ont = "BP",
+         universe = universe
+  )
+}
+
+
+egos_mf = foreach(clus = cluster_names,
+                  .final = function(x) setNames(x, cluster_names)) %dopar% {
+  genes = de_pairwise %>%
+    filter(cluster == clus, logFC > MIN_FC) %>%
+    pull(gene_symbol) %>% unique()
+  ego = enrichGO(genes,
+         OrgDb = org.Hs.eg.db,
+         keyType = "SYMBOL",
+         ont = "MF",
+         universe = universe
+  )
+                  }
+
+egos_bp_inv = foreach(clus = cluster_names,
+                  .final = function(x) setNames(x, cluster_names)) %dopar% {
+  genes = de_pairwise %>%
+    filter(cluster == clus, logFC < -MIN_FC) %>%
+    pull(gene_symbol) %>% unique()
+  ego = enrichGO(genes,
+         OrgDb = org.Hs.eg.db,
+         keyType = "SYMBOL",
+         ont = "BP",
+         universe = universe
+  )
+}
+
+
+egos_mf_inv = foreach(clus = cluster_names,
+                  .final = function(x) setNames(x, cluster_names)) %dopar% {
+  genes = de_pairwise %>%
+    filter(cluster == clus, logFC < -MIN_FC) %>%
+    pull(gene_symbol) %>% unique()
+  ego = enrichGO(genes,
+         OrgDb = org.Hs.eg.db,
+         keyType = "SYMBOL",
+         ont = "MF",
+         universe = universe
+  )
+}
+
+```
+
+```{r include=FALSE, fig.width=8, fig.height=6}
+p_go_mf = lapply(names(egos_mf), function(cluster) {
+  egos_mf[[cluster]]@result$Description = str_trunc(egos_mf[[cluster]]@result$Description, 50)
+  dotplot(egos_mf[[cluster]], showCategory=30, font.size=9) + ggtitle(cluster)
+})
+
+p_go_bp = lapply(names(egos_bp), function(cluster) {
+  egos_bp[[cluster]]@result$Description = str_trunc(egos_bp[[cluster]]@result$Description, 50)
+  dotplot(egos_bp[[cluster]], showCategory=30, font.size=9) + ggtitle(cluster)
+})
+
+p_go_mf_inv = lapply(names(egos_mf_inv), function(cluster) {
+  egos_mf_inv[[cluster]]@result$Description = str_trunc(egos_mf_inv[[cluster]]@result$Description, 50)
+  dotplot(egos_mf_inv[[cluster]], showCategory=30, font.size=9) + ggtitle(cluster)
+})
+
+p_go_bp_inv = lapply(names(egos_bp_inv), function(cluster) {
+  egos_bp_inv[[cluster]]@result$Description = str_trunc(egos_bp_inv[[cluster]]@result$Description, 50)
+  dotplot(egos_bp_inv[[cluster]], showCategory=30, font.size=9) + ggtitle(cluster)
+})
+```
+
+
+## Biological process
+The plots show the 20 most enriched GO-terms from the biological-process ontology. The further right a point, the
+higher the score of the corresponding term.
+
+```{r echo=FALSE, fig.width=18, fig.height=6}
+plot_grid(plotlist = p_go_bp, ncol=3) + ggtitle("foo")
+plot_grid(plotlist = p_go_bp_inv, ncol=3)
+```
+
+## GO term enrichment: Molecular function
+The plots show the 20 most enriched GO-terms from the molecular function ontology. The further right a point, the
+higher the score of the corresponding term. If fewer terms are shown, there were fewer terms that met the statistical significance threshold.
+
+```{r echo=FALSE, fig.width=18, fig.height=6}
+plot_grid(plotlist = p_go_mf, ncol=3)
+plot_grid(plotlist = p_go_mf_inv, ncol=3)
+```
+
+--> 
+
+## Violin Plots
+
+```{python, include=FALSE}
+adata_cd39 = adata[adata.obs["cd39_status"] != "na", :]
+genes = ["ENTPD1", "ITGAE", "ITGA1", "PDCD1", "CXCL13", "GZMB", "ALOX5AP", "IFNG", "GNLY", "LAG3", "RUNX2", "FOXP3", "IL2RA", "PIM2", "TNFRSF4", "IL32"]
+```
+
+```{python, message=FALSE, warning=FALSE}
+sc.pl.dotplot(adata_cd39, groupby="cd39_status", 
+                     var_names=genes)
+
+```
+
+
+```{python, message=FALSE, warning=FALSE}
+sc.pl.stacked_violin(adata_cd39, groupby="cd39_status", 
+                     var_names=genes, 
+                                figsize=(6, 3))
+```
+
+
+```{python, message=FALSE, warning=FALSE, include=FALSE}
+sc.pl.stacked_violin(adata_cd39, groupby="cd39_status", 
+                     var_names=genes, swap_axes=True, figsize=(1, 12), use_raw=True, save="_narrow.svg")
+```
+
+```{python, message=FALSE, warning=FALSE}
+sc.pl.stacked_violin(adata_cd39, groupby="cd39_status", 
+                     var_names=genes, swap_axes=True, figsize=(5, 12), use_raw=True, save="_wide.svg")
+```
+
+
+## Differences in Transcription Factors (SCENIC analysis)
+```{python include=FALSE}
+adata_scenic = adata_scenic[adata.obs_names, :].copy()
+adata_scenic.obs["cd39_status"] = adata.obs["cd39_status"]
+```
+
+```{python include=FALSE}
+df_obs = adata_scenic.obs
+signature_column_names = list(df_obs.select_dtypes("number").columns)
+signature_column_names = list(
+    filter(lambda s: s.startswith("Regulon("), signature_column_names)
+)
+
+df_scores = df_obs[signature_column_names + ["cd39_status"]]
+df_scenic_z = (
+    (
+        (
+            df_scores.groupby(by="cd39_status").mean()
+            - df_obs[signature_column_names].mean()
+        )
+        / df_obs[signature_column_names].std()
+    )
+    .stack()
+    .reset_index()
+    .rename(columns={"level_1": "regulon", 0: "Z"})
+)
+
+df_scenic_z["regulon"] = list(map(lambda s: s[8:-1], df_scenic_z["regulon"]))
+df_scenic_z[(df_scenic_z["Z"] >= 1.0)].sort_values("Z", ascending=False).head()
+```
+
+```{python include=FALSE}
+## Compute regulon specificity scores
+scenic_rss = regulon_specificity_scores(
+    pd.DataFrame(
+        adata_scenic.obsm["X_aucell"],
+        index=adata_scenic.obs_names,
+        columns=adata_scenic.uns["aucell"]["regulon_names"],
+    ),
+    adata_scenic.obs["cd39_status"],
+)
+scenic_rss.head()
+```
+
+
+The plot shows the enrichment of regulons (i.e. groups of genes that are directly regulated by a certain transcription factor)
+in the different CD39+ groups respectively. The values shown are the average enrichment scores of a certain regulon in 
+a certain cell-type standardized by the mean and standard deviation of the enrichment scores of a certain regulon in *all* cell-types ([Z-scores](https://en.wikipedia.org/wiki/Standard_score#/media/File:The_Normal_Distribution.svg)). 
+
+
+```{python echo=FALSE, fig.width=12, fig.height=5}
+df_heatmap = pd.pivot_table(
+    data=df_scenic_z.loc[df_scenic_z["Z"]>=0,:].sort_values("Z", ascending=False),
+    index="cd39_status",
+    columns="regulon",
+    values="Z",
+)
+
+fig, ax1 = plt.subplots(1, 1, figsize=(12, 5))
+sns.heatmap(
+    df_heatmap.loc[:, np.max(df_heatmap, axis=0) >= .75],
+    # df_heatmap, 
+    ax=ax1,
+    annot=True,
+    fmt=".1f",
+    linewidths=1,
+    cbar=False,
+    square=True,
+    linecolor="gray",
+    cmap="YlGnBu",
+    annot_kws={"size": 8},
+)
+ax1.set_ylabel("")
+plt.show()
+```
+
+Relatedly, we identify cell-type-specific regulators using the
+*Regulon Specificity Scores* (RSS), a value between 0 and 1 quantifying 
+how specific a transcription factor is for a certain cell-type. 
+An RSS of 1 indicates perfect specificity, an RSS of 0 signifies 
+that the TF is equally enriched in all cell-types. 
+
+For the definition of the RSS, refer to [Suo et al. 2018](https://dx.doi.org/10.1016/j.celrep.2018.10.045)
+```{python echo=FALSE, fig.width=16, fig.height=8}
+sns.set()
+sns.set(style='whitegrid', font_scale=0.8)
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 8), dpi=100)
+plot_rss(scenic_rss, 'CD4', ax=ax1, fontdict={'size': 10})
+ax1.set_xlabel('')
+plot_rss(scenic_rss, 'CD8', ax=ax2, fontdict={'size': 10})
+ax2.set_xlabel('')
+ax2.set_ylabel('')
+plot_rss(scenic_rss, 'Treg', ax=ax3, fontdict={'size': 10})
+ax3.set_xlabel('')
+ax3.set_ylabel('')
+plt.show()
+```
+
+
+## PAGA, umap and sub-clustering
+```{python, include=FALSE}
+sc.pp.neighbors(adata_cd39, n_neighbors=10)
+sc.tl.leiden(adata_cd39)
+sc.tl.paga(adata_cd39, groups="leiden")
+```
+
+**PAGA** (Partition-based graph abstraction) quantifies the connectivities (i.e. similarities) between clusters. Each node refers to a sub-cluster, the colors are according to the CD4, CD8, Treg clusters as in the UMAP plot below. 
+```{python, message=FALSE, warning=FALSE}
+sc.pl.paga(adata_cd39, color="cd39_status", threshold=.10)
+```
+
+```{python}
+sc.tl.umap(adata_cd39, init_pos="paga")
+# sc.tl.umap(adata_cd39)
+```
+
+UMAP plot. `leiden` = subclusters. 
+```{python}
+sc.pl.umap(adata_cd39, color=["cd39_status", "leiden"])
+```
+

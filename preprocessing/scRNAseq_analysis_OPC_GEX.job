@@ -1,0 +1,36 @@
+#$ -S /bin/sh
+
+#$ -pe smp 24
+#$ -cwd
+#$ -V
+
+
+#$ -N scRNAseq_analysis_OPC_GEX
+
+#$ -e ../Logs/scRNAseq_analysis_OPC_GEX.err
+#$ -o ../Logs/scRNAseq_analysis_OPC_GEX.out
+
+#$ -r y
+
+ncores=24
+
+projdir=/home/finotello/myScratch/Projects/scRNA-seq/vanderBurg_Oropharyngeal_Cancer/
+indir=$projdir"Fastq/"
+
+outdir_gex=$projdir"/GEX/"
+
+files_gex=OPC_GEX_files.txt
+ls $indir | grep "_GEX" > $files_gex
+
+while read cfile
+do
+
+	sample=`basename $cfile | sed 's/_GEX$//g'`
+	id=`echo $sample | sed 's/^.*_//g'`
+	fastqs=$indir$sample
+	fastqs_gex=$fastqs"_GEX/"
+
+	# GEX analysis
+	bash scRNAseq_analysis_GEX.sh -i $id -f $fastqs_gex -s $sample -n $ncores -o $outdir_gex -c auto
+
+done < $files_gex

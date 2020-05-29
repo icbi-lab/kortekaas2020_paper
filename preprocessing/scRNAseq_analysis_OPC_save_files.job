@@ -1,0 +1,47 @@
+#$ -S /bin/sh
+
+indir=/home/finotello/myScratch/Projects/scRNA-seq/vanderBurg_Oropharyngeal_Cancer/Code/
+out_gex=/home/finotello/myScratch/Projects/scRNA-seq/vanderBurg_Oropharyngeal_Cancer/GEX/
+out_tcr=/home/finotello/myScratch/Projects/scRNA-seq/vanderBurg_Oropharyngeal_Cancer/TCR/
+out_html=/home/finotello/myScratch/Projects/scRNA-seq/vanderBurg_Oropharyngeal_Cancer/Html/
+
+files_gex=GEXoutfiles.txt
+ls  | grep "_GEX$" > $files_gex
+files_tcr=TCRoutfiles.txt
+ls  | grep "_TCR$" > $files_tcr
+
+while read cfile
+do
+
+	id=`echo $cfile | sed 's/_GEX//g'`
+	id="H"$id
+
+	# Expression data
+	odir=$out_gex$id
+	mkdir -p $odir
+	cp -Rf $indir$cfile"/outs/filtered_feature_bc_matrix" $odir
+	odir=$odir"/filtered_feature_bc_matrix/"
+	gunzip -f $odir"features.tsv.gz"
+	gunzip -f $odir"matrix.mtx.gz"
+	gunzip -f $odir"barcodes.tsv.gz"
+	mv $odir"features.tsv" $odir"genes.tsv"
+
+	# Html report
+	cp $indir$cfile"/outs/web_summary.html" $out_html$id"_GEX_web_summary.html"
+
+done < $files_gex
+
+while read cfile
+do
+
+        id=`echo $cfile | sed 's/_TCR//g'`
+        id="H"$id
+
+        # Expression data
+        odir=$out_tcr$id
+        mkdir -p $odir
+
+        # Html report
+        cp $indir$cfile"/outs/web_summary.html" $out_html$id"_TCR_web_summary.html"
+
+done < $files_tcr

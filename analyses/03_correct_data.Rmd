@@ -1,0 +1,182 @@
+---
+title: Correct data
+params:
+    input_file: NULL
+    results_dir: NULL
+    output_file: NULL
+jupyter:
+  jupytext:
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.1'
+      jupytext_version: 1.2.4
+  kernelspec:
+    display_name: Python [conda env:.conda-vanderburg_oropharyngeal_cancer]
+    language: python
+    name: conda-env-.conda-vanderburg_oropharyngeal_cancer-py
+---
+
+# Input data and configuration
+
+```{python tags=c("parameters", "hide_input")}
+# get default parameters. Either papermill or rmarkdown way.
+try:
+    input_file = r.params["input_file"]
+    output_file = r.params["output_file"]
+except:
+    print("Could not access params from `r` object. Don't worry if your are running papermill. ")
+    input_file = "results/02_process_data/adata.h5ad"
+    output_file = "results/03_correct_data/adata.h5ad"
+```
+
+
+```{python include=FALSE}
+import pandas as pd
+import scanpy as sc
+import numpy as np
+from matplotlib import pyplot as plt
+import os
+import sys
+import gc
+import warnings
+sys.path.append("lib")
+sys.path.append("../lib")
+from jupytertools import setwd, fix_logging
+from scio import concatenate
+from scpp import norm_log
+setwd()
+fix_logging(sc.settings)
+from numba import NumbaWarning
+warnings.filterwarnings("ignore", category=NumbaWarning)
+```
+
+```{python}
+biomart = pd.read_csv("tables/biomart.tsv", sep="\t")
+cell_cycle_regev = pd.read_csv("tables/cell_cycle_regev.tsv", sep="\t")
+cell_cycle_regev = cell_cycle_regev[["hgnc_symbol", "phase"]].drop_duplicates()
+```
+
+```{python load_adata, message=FALSE}
+adata = sc.read_h5ad(input_file)
+```
+
+# Normalize and scale
+
+The `raw` data object will contain normalized, log-transformed values for visualiation.
+The original, raw (UMI) counts are stored in `adata.obsm["raw_counts"]`.
+
+While there are more sophisticated *countFactor normalization methods*, we stick to a simple CPM method here.
+
+```{python}
+norm_log(adata)
+```
+
+```{python}
+sc.pp.pca(adata)
+sc.pp.neighbors(adata)
+sc.tl.umap(adata)
+```
+
+# Combat
+per-sample batch-effect correction
+
+UMAP plots before correction:
+
+```{python}
+sc.pl.umap(adata, color=["samples", "n_genes", "mt_frac", "doublet_score", "hpv_status", "ir_status"], ncols=2)
+```
+
+```{python}
+adata_before_combat = adata.copy()
+```
+
+```{python}
+sc.pp.combat(adata, key="samples")
+```
+
+UMAP plots after correction:
+
+```{python}
+sc.pp.pca(adata)
+sc.pp.neighbors(adata)
+sc.tl.umap(adata)
+sc.pl.umap(adata, color=["samples", "n_genes", "mt_frac", "doublet_score", "hpv_status", "ir_status"], ncols=2)
+```
+
+# Highly variable genes
+
+We perform highly variable gene filtering to reduce the feature space to genes that contain biologically relevant information. This step is required for most downsteam analysis and reduces computation time.
+
+A threshold of 4000 HVG is commonly recommended (Luecken and Theis 2019).
+
+```{python}
+sc.pp.highly_variable_genes(adata, flavor="cell_ranger", n_top_genes=4000)
+```
+
+```{python}
+sc.pl.highly_variable_genes(adata)
+```
+
+```{python echo="FALSE"}
+print("Highly variable genes: ", np.sum(adata.var["highly_variable"]))
+print("Total genes:", adata.shape[1])
+```
+
+```{python}
+sc.pp.pca(adata)
+sc.pp.neighbors(adata)
+sc.tl.umap(adata)
+sc.tl.leiden(adata)
+```
+
+# visualize confounders
+
+Visualize confounding factors after batch effect correction and HVG-filtering:
+
+### Compute cell-cycle phase for each cell
+
+```{python}
+sc.tl.score_genes_cell_cycle(adata,
+                             s_genes = cell_cycle_regev.loc[cell_cycle_regev["phase"] == "S","hgnc_symbol"].values,
+                             g2m_genes = cell_cycle_regev.loc[cell_cycle_regev["phase"] == "G2M","hgnc_symbol"].values)
+```
+
+### Display confounding factors
+
+```{python}
+sc.pl.umap(adata, color=["n_genes", "n_counts", "mt_frac", "samples", "origin", "leiden", "phase", "doublet_score", "ir_status", "hpv_status"], ncols=2)
+```
+
+# Save results
+
+```{python}
+adata.write(output_file, compression="lzf")
+```
+
+# Summary
+The purpose of this notebook is to
+
+* load the filtered cells from the previous steps
+* Normalize the data
+* remove confounding-factors
+
+## Normalize data
+The number of reads sequenced per cell is the result of a random sampling process.
+We, therefore, need to normalize the number of detected reads per cell.
+A straightforward approach is the counts per million (CPM) normalization that we use here.
+
+## Remove confounding effects
+We use combat to address sample-specific batch effects.
+As we can see in the following UMAP-plots, before applying combat, the cells heavliy group by sample. After applying combat, this effect is less prevalent, while the main clusters are maintained, indicating that the biological variability is not removed by over-correction.
+
+```{python echo=FALSE}
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+sc.pl.umap(adata_before_combat, color="samples", ax=ax1, show=False)
+sc.pl.umap(adata, color="samples", ax=ax2)
+```
+
+## Highly-variable gene filtering
+We perform highly variable (HVG) gene filtering to reduce the feature space to genes that contain biologically relevant information. This step is required for most downsteam analysis and reduces computation time.
+
+A threshold of 4000 HVG is commonly recommended (Luecken and Theis 2019).

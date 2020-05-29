@@ -1,0 +1,24 @@
+#$ -S /bin/sh
+#$ -pe smp 12
+#$ -cwd
+#$ -V
+
+#$ -N Trimmomatic.job
+
+#$ -e ../Logs/Trimmomatic.err
+#$ -o ../Logs/Trimmomatic.out
+
+
+TRIMMOMATIC="java -jar /usr/local/bioinf/trimmomatic/Trimmomatic-0.36/trimmomatic-0.36.jar"
+Nthreads=12
+
+#mdir=/home/finotello/myScratch/Projects/scRNA-seq/vanderBurg_Oropharyngeal_Cancer/Fastq/68_GEX/
+#infile=$mdir"68_GEX_S6_L001_R1_001_untrimmed.fastq.gz"
+#outfile=$mdir"68_GEX_S6_L001_R1_001.fastq.gz"
+#${TRIMMOMATIC} SE -threads ${Nthreads} -phred33 ${infile} ${outfile} CROP:26
+
+mdir=/home/finotello/myScratch/Projects/scRNA-seq/vanderBurg_Oropharyngeal_Cancer/Fastq/141_GEX/
+infile=$mdir"141_GEX_S5_L001_R1_001_untrimmed.fastq.gz"
+outfile=$mdir"141_GEX_S5_L001_R1_001.fastq.gz"
+${TRIMMOMATIC} SE -threads ${Nthreads} -phred33 ${infile} ${outfile} CROP:26
+
