@@ -2,7 +2,6 @@
 title: Analysis CD39
 params:
   input_file: "../results/50_prepare_analysis_cd39/adata.h5ad"
-  adata_scenic: "../results/06_prepare_scenic_analysis/adata.h5ad"
   input_de_res_dir_cd39: "../results/50-2_run_de_analysis_cd39"
   cpus: 16
 ---
@@ -45,12 +44,10 @@ import seaborn as sns
 
 sys.path.extend(("lib", "../lib"))
 from jupytertools import *
-from scenictools import * 
 fix_logging(sc.settings)
 matplotlib.rcParams.update({"figure.autolayout": True, "figure.max_open_warning": 0})
 
 adata = sc.read_h5ad(r.params['input_file'])
-adata_scenic = sc.read_h5ad(r.params['adata_scenic'])
 ```
 
 ```{r}
@@ -115,7 +112,7 @@ p_pairwise = de_pairwise2 %>%
     theme_bw() +
     theme(legend.position="none")
 
-ggsave2(filename="figures/de.pdf", plot = p_pairwise, width=12, height=7, units="in")
+#ggsave2(filename="figures/de.pdf", plot = p_pairwise, width=12, height=7, units="in")
 # ggsave2(filename="figures/de.svg", plot = p_pairwise, width=12, height=7, units="in")
 
 
@@ -287,127 +284,5 @@ sc.pl.stacked_violin(adata_cd39, groupby="cd39_status",
 ```{python, message=FALSE, warning=FALSE}
 sc.pl.stacked_violin(adata_cd39, groupby="cd39_status", 
                      var_names=genes, swap_axes=True, figsize=(5, 12), use_raw=True, save="_wide.svg")
-```
-
-
-## Differences in Transcription Factors (SCENIC analysis)
-```{python include=FALSE}
-adata_scenic = adata_scenic[adata.obs_names, :].copy()
-adata_scenic.obs["cd39_status"] = adata.obs["cd39_status"]
-```
-
-```{python include=FALSE}
-df_obs = adata_scenic.obs
-signature_column_names = list(df_obs.select_dtypes("number").columns)
-signature_column_names = list(
-    filter(lambda s: s.startswith("Regulon("), signature_column_names)
-)
-
-df_scores = df_obs[signature_column_names + ["cd39_status"]]
-df_scenic_z = (
-    (
-        (
-            df_scores.groupby(by="cd39_status").mean()
-            - df_obs[signature_column_names].mean()
-        )
-        / df_obs[signature_column_names].std()
-    )
-    .stack()
-    .reset_index()
-    .rename(columns={"level_1": "regulon", 0: "Z"})
-)
-
-df_scenic_z["regulon"] = list(map(lambda s: s[8:-1], df_scenic_z["regulon"]))
-df_scenic_z[(df_scenic_z["Z"] >= 1.0)].sort_values("Z", ascending=False).head()
-```
-
-```{python include=FALSE}
-## Compute regulon specificity scores
-scenic_rss = regulon_specificity_scores(
-    pd.DataFrame(
-        adata_scenic.obsm["X_aucell"],
-        index=adata_scenic.obs_names,
-        columns=adata_scenic.uns["aucell"]["regulon_names"],
-    ),
-    adata_scenic.obs["cd39_status"],
-)
-scenic_rss.head()
-```
-
-
-The plot shows the enrichment of regulons (i.e. groups of genes that are directly regulated by a certain transcription factor)
-in the different CD39+ groups respectively. The values shown are the average enrichment scores of a certain regulon in 
-a certain cell-type standardized by the mean and standard deviation of the enrichment scores of a certain regulon in *all* cell-types ([Z-scores](https://en.wikipedia.org/wiki/Standard_score#/media/File:The_Normal_Distribution.svg)). 
-
-
-```{python echo=FALSE, fig.width=12, fig.height=5}
-df_heatmap = pd.pivot_table(
-    data=df_scenic_z.loc[df_scenic_z["Z"]>=0,:].sort_values("Z", ascending=False),
-    index="cd39_status",
-    columns="regulon",
-    values="Z",
-)
-
-fig, ax1 = plt.subplots(1, 1, figsize=(12, 5))
-sns.heatmap(
-    df_heatmap.loc[:, np.max(df_heatmap, axis=0) >= .75],
-    # df_heatmap, 
-    ax=ax1,
-    annot=True,
-    fmt=".1f",
-    linewidths=1,
-    cbar=False,
-    square=True,
-    linecolor="gray",
-    cmap="YlGnBu",
-    annot_kws={"size": 8},
-)
-ax1.set_ylabel("")
-plt.show()
-```
-
-Relatedly, we identify cell-type-specific regulators using the
-*Regulon Specificity Scores* (RSS), a value between 0 and 1 quantifying 
-how specific a transcription factor is for a certain cell-type. 
-An RSS of 1 indicates perfect specificity, an RSS of 0 signifies 
-that the TF is equally enriched in all cell-types. 
-
-For the definition of the RSS, refer to [Suo et al. 2018](https://dx.doi.org/10.1016/j.celrep.2018.10.045)
-```{python echo=FALSE, fig.width=16, fig.height=8}
-sns.set()
-sns.set(style='whitegrid', font_scale=0.8)
-fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 8), dpi=100)
-plot_rss(scenic_rss, 'CD4', ax=ax1, fontdict={'size': 10})
-ax1.set_xlabel('')
-plot_rss(scenic_rss, 'CD8', ax=ax2, fontdict={'size': 10})
-ax2.set_xlabel('')
-ax2.set_ylabel('')
-plot_rss(scenic_rss, 'Treg', ax=ax3, fontdict={'size': 10})
-ax3.set_xlabel('')
-ax3.set_ylabel('')
-plt.show()
-```
-
-
-## PAGA, umap and sub-clustering
-```{python, include=FALSE}
-sc.pp.neighbors(adata_cd39, n_neighbors=10)
-sc.tl.leiden(adata_cd39)
-sc.tl.paga(adata_cd39, groups="leiden")
-```
-
-**PAGA** (Partition-based graph abstraction) quantifies the connectivities (i.e. similarities) between clusters. Each node refers to a sub-cluster, the colors are according to the CD4, CD8, Treg clusters as in the UMAP plot below. 
-```{python, message=FALSE, warning=FALSE}
-sc.pl.paga(adata_cd39, color="cd39_status", threshold=.10)
-```
-
-```{python}
-sc.tl.umap(adata_cd39, init_pos="paga")
-# sc.tl.umap(adata_cd39)
-```
-
-UMAP plot. `leiden` = subclusters. 
-```{python}
-sc.pl.umap(adata_cd39, color=["cd39_status", "leiden"])
 ```
 

@@ -1,4 +1,6 @@
 data
+deploy/*
+!deploy/.gitignore
 .snakemake
 .snakemake*
 logs
@@ -15,8 +17,6 @@ __pycache__
 raw
 .Rhistory
 .idea
-deploy/*
-!deploy/.gitignore
 .nextflow*
 work
 analyses/figures

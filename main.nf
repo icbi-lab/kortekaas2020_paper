@@ -48,7 +48,8 @@ process p02_filter_data {
     reportsrender notebook.Rmd \
         ${id}.html \
         --cpus=${task.cpus} \
-        --params="input_file=input_adata.h5ad output_file=adata.h5ad"
+        --params="input_file=input_adata.h5ad output_file=adata.h5ad" \
+        --engine="papermill"
     """
 }
 
@@ -265,10 +266,9 @@ process p51_analysis_cd39 {
     publishDir "$RES_DIR/$id", mode: params.publishDirMode
 
     input:
-        file 'lib/*' from Channel.fromPath("lib/{jupytertools,scenictools}.py").collect()
+        file 'lib/*' from Channel.fromPath("lib/jupytertools.py").collect()
         file 'notebook.Rmd' from Channel.fromPath("analyses/${id}.Rmd")
         file 'input_adata.h5ad' from prepare_analysis_cd39_adata
-        file 'adata_scenic.h5ad' from adata_scenic_4
         file "res_de_cd39/*" from run_de_analysis_cd39_results.collect()
 
     output:
@@ -280,7 +280,6 @@ process p51_analysis_cd39 {
         ${id}.html \
         --cpus=${task.cpus} \
         --params="input_file=input_adata.h5ad \
-                  adata_scenic=adata_scenic.h5ad \
                   input_de_res_dir_cd39=res_de_cd39 \
                   cpus=${task.cpus}"
     zip ${id}.zip *.xls*
