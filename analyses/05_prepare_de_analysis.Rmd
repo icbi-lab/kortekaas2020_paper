@@ -117,7 +117,7 @@ sc.tl.umap(adata)
 ```
 
 ```{python}
-sc.pl.umap(adata, color=["samples", "cell_type", "hpv_status", "ir_status"])
+sc.pl.umap(adata, color=["samples", "cell_type"])
 sc.pl.umap(adata, color=["CD4", "CD8A", "FOXP3", "PDCD1", "KLRF1"])
 ```
 
@@ -126,13 +126,13 @@ sc.pl.umap(adata, color=["CD4", "CD8A", "FOXP3", "PDCD1", "KLRF1"])
 
 * Using combat resulted in a blob with a lot of signal lost.
 * The patients are admixed fairly well already (and will improve further after HVG filtering (see below))
-* I don't use combat here therefore. 
+* I don't use combat here therefore.
 
 (using combat with covariates did not work out -> singular matrix, i.e. too few samples per group)
 
 
 ### HVG-filtering
-* variable genes reduced to 3000, as we are only dealing with cells of the same major type now. 
+* variable genes reduced to 3000, as we are only dealing with cells of the same major type now.
 <!-- #endregion -->
 
 ```{python}
@@ -140,10 +140,10 @@ sc.pp.highly_variable_genes(adata, flavor="cell_ranger", n_top_genes=3000)
 sc.pl.highly_variable_genes(adata)
 ```
 
-### redo neighbors and clustering after HVG filtering. 
+### redo neighbors and clustering after HVG filtering.
 
 * patient admixture looks a lot better now
-* batch effects appear not to be a major issue. 
+* batch effects appear not to be a major issue.
 
 ```{python}
 sc.pp.pca(adata, svd_solver="arpack")
@@ -152,7 +152,7 @@ sc.tl.umap(adata)
 ```
 
 ```{python}
-sc.pl.umap(adata, color=["samples", "cell_type", "hpv_status", "ir_status"])
+sc.pl.umap(adata, color=["samples", "cell_type"])
 sc.pl.umap(adata, color=["CD4", "CD8A", "FOXP3", "PDCD1", "KLRF1"])
 ```
 
@@ -184,7 +184,7 @@ for ct, tmp_adata in adatas.items():
     sc.pp.pca(tmp_adata, svd_solver="arpack")
     sc.pp.neighbors(tmp_adata, n_neighbors=10)
     sc.tl.umap(tmp_adata)
-    sc.pl.umap(tmp_adata, color=["samples", "cell_type", "hpv_status", "ir_status"])
+    sc.pl.umap(tmp_adata, color=["samples", "cell_type"])
 ```
 
 ```{python}
@@ -197,13 +197,13 @@ def leiden_with_r(adata_key, r, seed):
 ```{python}
 def test_leiden_thresholds(adata_key, resolutions, seeds, n_cpus):
     """
-    Test different leiden thresholds. 
-    
+    Test different leiden thresholds.
+
     Args:
         adata:
         resolutions: numpy array containing all resolutions to test
-        seeds: numpy array containin random seeds (every resolution is tested with every seed) 
-        p: multiprocessing.Pool 
+        seeds: numpy array containin random seeds (every resolution is tested with every seed)
+        p: multiprocessing.Pool
     """
     args = list(itertools.product([adata_key], resolutions, seeds))
     #     p = lambda: None
@@ -252,7 +252,7 @@ for ct, tmp_adata in adatas.items():
     plt.show()
 ```
 
-There is no clear plateau... anyway, 10 clusters sounds reasonable. 
+There is no clear plateau... anyway, 10 clusters sounds reasonable.
 
 ```{python}
 for ct, tmp_adata in adatas.items():
@@ -281,231 +281,3 @@ adata.write_h5ad(output_file, compression="lzf")
 adata.obs.to_csv(output_file_obs, sep="\t")
 ```
 
-## DE questions
-* T cell clusters: all against all
-* HPV+ vs HPV- (by coarse cell type)
-* IR+ vs IR- (by coarse cell type)
-
-
-
-```{python}
-adata_edger = adata.copy()
-# edgeR expects raw counts, normalization does not have any effect. We can therefore simply undo log1p
-adata_edger.X = np.expm1(adata_edger.X)
-hpv_map = {"HPV16+": "hpv_pos", "HPV-": "hpv_neg"}
-ct_map = {
-    "T cell CD8+": "t_cd8",
-    "T cell regulatory": "t_reg",
-    "T cell CD4+ non-regulatory": "t_cd4",
-    "NK cell": "nk",
-}
-ir_map = {"IR+": "ir_pos", "IR-": "ir_neg"}
-
-
-def remap(adata, col, dict_):
-    adata.obs[col] = [dict_.get(x, x) for x in adata.obs[col]]
-
-
-remap(adata_edger, "hpv_status", hpv_map)
-remap(adata_edger, "ir_status", ir_map)
-remap(adata_edger, "cell_type", ct_map)
-```
-
-```{python}
-adata_edger.obs["cluster"].unique()
-```
-
-```{python}
-de_dir = results_dir
-# !mkdir -p {de_dir}
-```
-
-```{r magic_args='-i adata_edger -i de_dir'}
-adata = adata_edger
-dim(adata)
-```
-
-# make bulk
-As we compare between patients and not between cells, it seems advantageous to create "artificial bulk" samples. 
-If we test on the single cells between patients, expression changes that are driven by a single patient (and might be batch effects) become significant. 
-
-The data in `adata_edger` is normalized and non-log-transformed (the log-transformation was undone above)
-
-```{python}
-bobs = (
-    adata_edger.obs.groupby(["patient", "hpv_status", "ir_status"])
-    .agg(average_mito=("mt_frac", np.mean), total_reads=("n_counts", np.sum))
-    .reset_index()
-    .set_index("patient")
-    .dropna()
-)
-
-
-bulk_Xs = {}
-tmp_cell_types = ["overall", "t_cd8", "t_cd4", "t_reg", "nk"]
-for cell_type in tmp_cell_types:
-    ct_mask = (
-        (adata_edger.obs["cell_type"] == cell_type).values
-        if cell_type != "overall"
-        else True
-    )
-    bulk_Xs[cell_type] = OrderedDict()
-    for patient in bobs.index:
-        patient_mask = (adata_edger.obs["patient"] == patient).values
-        bulk_Xs[cell_type][patient] = np.mean(
-            adata_edger.X[ct_mask & patient_mask, :], axis=0
-        )
-        assert bulk_Xs[cell_type][patient].size == adata.shape[1]
-
-# bdata = sc.AnnData(var = adata.var, )
-```
-
-```{python}
-bdatas = []
-for cell_type in tmp_cell_types:
-    tmp_colnames = np.hstack([n for n in bulk_Xs[cell_type].keys()])
-    assert np.all(tmp_colnames == bobs.index), "order of samples matches obs"
-    X = np.vstack([s for s in bulk_Xs[cell_type].values()])
-    bdatas.append(sc.AnnData(var=adata_edger.var, obs=bobs, X=X))
-```
-
-```{r magic_args='-i bdatas -i tmp_cell_types'}
-names(bdatas) = tmp_cell_types
-```
-
-### T cell clusters
-
-```{r}
-design = model.matrix(~0 + leiden + patient + n_genes + mt_frac, data=colData(adata))
-```
-
-```{r}
-#' make contrasts: one against all others.
-#' 
-#' @param design design matrix
-#' @param col_data colData or the SingleCellExperiment object. 
-#' @param column column name that is used for the contrasts. Also needs to be 
-#'    specified as first variable in the model.matrix.
-make_contrasts = function(design, col_data, column) {
-    n_clus = length(unique(col_data[[column]]))
-    upper_block = matrix(rep(-1/(n_clus-1), n_clus^2), ncol=n_clus)
-    diag(upper_block) = rep(1, n_clus)
-    lower_block = matrix(rep(0, (ncol(design)-n_clus) * n_clus), ncol=n_clus)
-    contrasts = rbind(upper_block, lower_block)
-    rownames(contrasts) = colnames(design)
-    colnames(contrasts) = colnames(design)[1:n_clus]
-    contrasts
-}
-```
-
-```{r}
-# per cell type
-adata_bk = adata
-cell_types = list("t_cd8", c("t_cd4", "t_reg"), "nk")
-lapply(cell_types, function(ct) {
-    tmp_adata = adata_bk[, colData(adata_bk)$cell_type %in% ct]
-    colData(tmp_adata)$cluster = droplevels(colData(tmp_adata)$cluster)
-    print(dim(colData(tmp_adata)))
-    design = model.matrix(~0 + cluster + patient + n_genes + mt_frac, data=colData(tmp_adata))
-    print(dim(design))
-    contrasts = make_contrasts(design, colData(tmp_adata), "cluster")
-    adata=tmp_adata
-    save(adata, design, contrasts, file=paste0(de_dir, '/cluster_', ct[1], '.rda'), compress=FALSE)
-})
-adata = adata_bk
-```
-
-### HPV+ vs. HPV-
-
-```{r}
-design = model.matrix(
-    ~0 + hpv_status + cell_type + n_genes + mt_frac, data=colData(adata)
-)
-contrasts = makeContrasts(
-    overall=hpv_statushpv_pos - hpv_statushpv_neg, levels=colnames(design)
-)
-save(adata, design, contrasts, file=paste0(de_dir, "/hpv.rda"), compress=FALSE)
-```
-
-```{r}
-# per cell type
-adata_bk = adata
-cell_types = c("t_cd8", "t_cd4", "t_reg", "nk")
-lapply(cell_types, function(ct) {
-    tmp_adata = adata_bk[, colData(adata_bk)$cell_type == ct]
-    design = model.matrix(~0 + hpv_status + n_genes + mt_frac, data=colData(tmp_adata))
-    contrasts = makeContrasts(
-        overall = hpv_statushpv_pos - hpv_statushpv_neg,
-        levels = colnames(design)
-    )
-    adata=tmp_adata
-    save(adata, design, contrasts, file=paste0(de_dir, '/hpv_', ct, '.rda'), compress=FALSE)
-})
-adata = adata_bk
-```
-
-### bulk
-
-```{r}
-adata_bk = adata
-lapply(names(bdatas), function(ct) {
-    bdata = bdatas[[ct]]
-    design = model.matrix(~0 + hpv_status + average_mito + total_reads, data=colData(bdata))
-    contrasts = makeContrasts(
-        overall = hpv_statushpv_pos - hpv_statushpv_neg,
-        levels = colnames(design)
-    )
-    adata=bdata
-    save(adata, design, contrasts, file=paste0(de_dir, '/bulk_hpv_', ct, '.rda'), compress=FALSE)
-})
-adata = adata_bk
-```
-
-## IR+ vs. IR-
-
-```{r}
-adata_bk = adata
-tmp_adata = adata[, colData(adata)$hpv_status == "hpv_pos"]
-design = model.matrix(~0 + ir_status + cell_type + n_genes + mt_frac, data=colData(tmp_adata))
-contrasts = makeContrasts(
-    overall = ir_statusir_pos - ir_statusir_neg,
-    levels = colnames(design)
-)
-adata = tmp_adata
-save(adata, design, contrasts, file=paste0(de_dir, '/ir.rda'), compress=FALSE)
-adata = adata_bk
-```
-
-```{r}
-# per cell type
-adata_bk = adata
-cell_types = c("t_cd8", "t_cd4", "t_reg", "nk")
-lapply(cell_types, function(ct) {
-    tmp_adata = adata[, colData(adata_bk)$cell_type == ct & colData(adata_bk)$hpv_status == "hpv_pos"]
-    design = model.matrix(~0 + ir_status + n_genes + mt_frac, data=colData(tmp_adata))
-    contrasts = makeContrasts(
-        overall = ir_statusir_pos - ir_statusir_neg,
-        levels = colnames(design)
-    )
-    adata=tmp_adata
-    save(adata, design, contrasts, file=paste0(de_dir, '/ir_', ct, '.rda'), compress=FALSE)
-})
-adata = adata_bk
-```
-
-### bulk
-
-```{r}
-adata_bk = adata
-lapply(names(bdatas), function(ct) {
-    bdata = bdatas[[ct]]
-    design = model.matrix(~0 + ir_status + average_mito + total_reads, data=colData(bdata))
-    contrasts = makeContrasts(
-        overall = ir_statusir_pos - ir_statusir_neg,
-        levels = colnames(design)
-    )
-    adata=bdata
-    save(adata, design, contrasts, file=paste0(de_dir, '/bulk_ir_', ct, '.rda'), compress=FALSE)
-})
-adata = adata_bk
-```

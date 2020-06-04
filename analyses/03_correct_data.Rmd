@@ -84,7 +84,7 @@ per-sample batch-effect correction
 UMAP plots before correction:
 
 ```{python}
-sc.pl.umap(adata, color=["samples", "n_genes", "mt_frac", "doublet_score", "hpv_status", "ir_status"], ncols=2)
+sc.pl.umap(adata, color=["samples", "n_genes", "mt_frac", "doublet_score"], ncols=2)
 ```
 
 ```{python}
@@ -101,7 +101,7 @@ UMAP plots after correction:
 sc.pp.pca(adata)
 sc.pp.neighbors(adata)
 sc.tl.umap(adata)
-sc.pl.umap(adata, color=["samples", "n_genes", "mt_frac", "doublet_score", "hpv_status", "ir_status"], ncols=2)
+sc.pl.umap(adata, color=["samples", "n_genes", "mt_frac", "doublet_score"], ncols=2)
 ```
 
 # Highly variable genes
@@ -145,7 +145,7 @@ sc.tl.score_genes_cell_cycle(adata,
 ### Display confounding factors
 
 ```{python}
-sc.pl.umap(adata, color=["n_genes", "n_counts", "mt_frac", "samples", "origin", "leiden", "phase", "doublet_score", "ir_status", "hpv_status"], ncols=2)
+sc.pl.umap(adata, color=["n_genes", "n_counts", "mt_frac", "samples", "origin", "leiden", "phase", "doublet_score"], ncols=2)
 ```
 
 # Save results

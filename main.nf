@@ -124,7 +124,6 @@ process p05_prepare_de_analysis {
         file 'input_adata.h5ad' from annotate_cell_types_adata
 
     output:
-        file "*.rda" into prepare_de_analysis_rdatas
         file "adata.h5ad" into prepare_de_analysis_adata,
             prepare_de_analysis_adata_2,
             prepare_de_analysis_adata_3,
@@ -149,61 +148,61 @@ process p05_prepare_de_analysis {
 }
 
 
-process p05_run_de_analysis {
-    def id = "05-2_run_de_analysis"
-    conda "envs/run_de.yml"
-    publishDir "$RES_DIR/$id", mode: params.publishDirMode
+/* process p05_run_de_analysis { */
+/*     def id = "05-2_run_de_analysis" */
+/*     conda "envs/run_de.yml" */
+/*     publishDir "$RES_DIR/$id", mode: params.publishDirMode */
 
-    //found to have max performance for the problem.
-    //with more CPUs the communication overhead between
-    //BLAS workers slows down the analysis.
-    cpus 6
+/*     //found to have max performance for the problem. */
+/*     //with more CPUs the communication overhead between */
+/*     //BLAS workers slows down the analysis. */
+/*     cpus 6 */
 
-    input:
-        file input_data from prepare_de_analysis_rdatas.flatten()
+/*     input: */
+/*         file input_data from prepare_de_analysis_rdatas.flatten() */
 
-    output:
-        file "${input_data}.res.tsv" into run_de_analysis_results,
-            run_de_analysis_results_2,
-            run_de_analysis_results_3,
-            run_de_analysis_results_4
+/*     output: */
+/*         file "${input_data}.res.tsv" into run_de_analysis_results, */
+/*             run_de_analysis_results_2, */
+/*             run_de_analysis_results_3, */
+/*             run_de_analysis_results_4 */
 
-    """
-    export OPENBLAS_NUM_THREADS=${task.cpus} OMP_NUM_THREADS=${task.cpus} \
-            MKL_NUM_THREADS=${task.cpus} OMP_NUM_cpus=${task.cpus} \
-            MKL_NUM_cpus=${task.cpus} OPENBLAS_NUM_cpus=${task.cpus} \
-            MKL_THREADING_LAYER=GNU
-    run_de.R ${input_data} ${input_data}.res.tsv --cpus=${task.cpus}
-    """
-}
+/*     """ */
+/*     export OPENBLAS_NUM_THREADS=${task.cpus} OMP_NUM_THREADS=${task.cpus} \ */
+/*             MKL_NUM_THREADS=${task.cpus} OMP_NUM_cpus=${task.cpus} \ */
+/*             MKL_NUM_cpus=${task.cpus} OPENBLAS_NUM_cpus=${task.cpus} \ */
+/*             MKL_THREADING_LAYER=GNU */
+/*     run_de.R ${input_data} ${input_data}.res.tsv --cpus=${task.cpus} */
+/*     """ */
+/* } */
 
 
-process p10_analysis_t_nk {
-    def id = "10_analysis_t_nk"
-    conda "envs/run_notebook.yml"
-    cpus 16
-    publishDir "$RES_DIR/$id", mode: params.publishDirMode
+/* process p10_analysis_t_nk { */
+/*     def id = "10_analysis_t_nk" */
+/*     conda "envs/run_notebook.yml" */
+/*     cpus 16 */
+/*     publishDir "$RES_DIR/$id", mode: params.publishDirMode */
 
-    input:
-        file 'lib/*' from Channel.fromPath("lib/jupytertools.py")
-        file 'notebook.Rmd' from Channel.fromPath("analyses/${id}.Rmd")
-        file 'input_adata.h5ad' from prepare_de_analysis_adata
-        file 'input_adata_obs.tsv' from prepare_de_analysis_adata_obs
-        file "*" from run_de_analysis_results.collect()
+/*     input: */
+/*         file 'lib/*' from Channel.fromPath("lib/jupytertools.py") */
+/*         file 'notebook.Rmd' from Channel.fromPath("analyses/${id}.Rmd") */
+/*         file 'input_adata.h5ad' from prepare_de_analysis_adata */
+/*         file 'input_adata_obs.tsv' from prepare_de_analysis_adata_obs */
+/*         file "*" from run_de_analysis_results.collect() */
 
-    output:
-        file "${id}.html" into analysis_t_nk_html
+/*     output: */
+/*         file "${id}.html" into analysis_t_nk_html */
 
-    """
-    reportsrender notebook.Rmd \
-        ${id}.html \
-        --cpus=${task.cpus} \
-        --params="input_adata=input_adata.h5ad \
-                  input_obs=input_adata_obs.tsv \
-                  input_de_res_dir=. \
-                  cpus=${task.cpus}"
-    """
-}
+/*     """ */
+/*     reportsrender notebook.Rmd \ */
+/*         ${id}.html \ */
+/*         --cpus=${task.cpus} \ */
+/*         --params="input_adata=input_adata.h5ad \ */
+/*                   input_obs=input_adata_obs.tsv \ */
+/*                   input_de_res_dir=. \ */
+/*                   cpus=${task.cpus}" */
+/*     """ */
+/* } */
 
 
 process p50_prepare_analysis_cd39 {
@@ -299,7 +298,6 @@ process deploy {
             correct_data_html,
             annotate_cell_types_html,
             prepare_de_analysis_html,
-            analysis_t_nk_html,
             analysis_cd39_html,
             prepare_analysis_cd39_html,
             analysis_cd39_tables,
