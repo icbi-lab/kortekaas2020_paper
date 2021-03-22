@@ -43,5 +43,5 @@ and run the analysis.
 
 ## Citation
 
-> t.b.a
+> Kortekaas, K. E., Santegoets, S. J., Sturm, G., Ehsan, I., van Egmond, S. L., Finotello, F., ... & van der Burg, S. H. (2020). CD39 Identifies the CD4+ Tumor-Specific T-cell Population in Human Cancer. Cancer immunology research, 8(10), 1311-1321.
 
